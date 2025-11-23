@@ -118,7 +118,7 @@ else:
 # Weight for global mixing: high-pop cells get stronger global influence
 pop_weight_for_global = np.sqrt(pop_norm)
 
-max_days = 365                      # Total number of days to simulate (0..365)
+max_days = 1247                      # Total number of days to simulate (0..max_days)
 
 # ============================================================
 # 4. Simulation function (one stochastic realization)
@@ -471,7 +471,7 @@ vline = ax_ts.axvline(0, linestyle="--", color="white", alpha=0.7)
 # Function to format the extinction text
 def format_extinction(ext_day):
     if ext_day is None:
-        return "Extinction: > 365"
+        return "Extinction: > 1247"
     else:
         return f"Extinction day: {ext_day}"
 
@@ -623,7 +623,7 @@ def apply_simulation_to_plots():
     fig.canvas.draw_idle()
 
 # ============================================================
-# 12. Buttons: <, >, Play, Pause, Randomize, Reset
+# 12. Buttons: <, >, Play/Pause, Randomize, Reset
 # ============================================================
 
 # Color of buttons
@@ -666,17 +666,19 @@ def on_next(event):
 
 btn_next.on_clicked(on_next)
 
-# "Play" button: animate days from current to end
-ax_play = fig.add_axes([0.70, 0.16, 0.08, 0.04])
-btn_play = Button(ax_play, "Play", color=button_color, hovercolor=hover_color)
-btn_play.label.set_color(text_color)
+# "Play/Pause" button: toggle play/pause
+ax_play_pause = fig.add_axes([0.70, 0.16, 0.08, 0.04])
+btn_play_pause = Button(ax_play_pause, "Play", color=button_color, hovercolor=hover_color)
+btn_play_pause.label.set_color(text_color)
 
-def on_play(event):
-    """Play from current day to the end unless paused."""
+def on_play_pause(event):
     global is_playing
     if is_playing:
-        return                 # If already playing, do nothing
-    is_playing = True          # Mark as playing
+        is_playing = False
+        btn_play_pause.label.set_text("Play")
+    else:
+        is_playing = True
+        btn_play_pause.label.set_text("Pause")
 
     start = int(day_slider.val)  # Start from the current slider value
     for d in range(start, max_days + 1):
@@ -686,21 +688,7 @@ def on_play(event):
         day_box.set_val(str(d))  # Update text box
         plt.pause(0.05)          # Wait a bit to show animation
 
-    is_playing = False           # Mark as not playing when done
-
-btn_play.on_clicked(on_play)
-
-# "Pause" button: stop animation
-ax_pause = fig.add_axes([0.80, 0.16, 0.08, 0.04])
-btn_pause = Button(ax_pause, "Pause", color=button_color, hovercolor=hover_color)
-btn_pause.label.set_color(text_color)
-
-def on_pause(event):
-    """Stop the Play loop."""
-    global is_playing
-    is_playing = False          # Just set flag to False; play loop will stop
-
-btn_pause.on_clicked(on_pause)
+btn_play_pause.on_clicked(on_play_pause)
 
 # "Randomize" button: new simulation (same seed locations, new randomness)
 ax_rand = fig.add_axes([0.58, 0.08, 0.20, 0.045])
