@@ -1,41 +1,32 @@
-# -*- coding: utf-8 -*-
-"""
-Spatial SIRD model for COVID‑19 on a 1 km grid over Sweden.
-
-- Each cell of the GeoPackage 'population_1km_2024.gpkg' is one metapopulation.
-- Compartments per cell: S, I, R, D (with waning immunity R -> S).
-- Transmission is a mix of local (within-cell) and weak global (between-cell) contacts.
-- A simple "lockdown" period scales down the contact rate.
-
-The epidemiological parameters below are chosen to approximate
-ancestral (pre‑variant) SARS‑CoV‑2 dynamics:
-
-    R0           ~ 2.8   (global early-pandemic meta-analyses)
-    IFR          ~ 0.68% (infection fatality ratio, population average)
-    Infectious period ~ 7 days
-    Immunity duration ~ 365 days
-
-These are supported by the literature and explained in the report.
+# -*- coding: utf-8 -*- 
+""" Spatial SIR model for COVID‑19 on a 1 km grid over Sweden. 
+- Each cell of the GeoPackage 'population_1km_2024.gpkg' is one metapopulation. 
+- Compartments per cell: S, I, R (with waning immunity R -> S). 
+- Transmission is a mix of local (within-cell) and weak global (between-cell) contacts. 
+- A simple "lockdown" period scales down the contact rate. 
+The epidemiological parameters below are chosen to approximate ancestral (pre‑variant) SARS‑CoV‑2 dynamics: 
+R0 ~ 2.8 (global early-pandemic meta-analyses) 
+IFR ~ 0.68% (infection fatality ratio, population average) 
+Infectious period ~ 7 days 
+Immunity duration ~ 365 days 
+These are supported by the literature and explained in the report. 
 """
 
-gpkg_path = "population_1km_2024.gpkg"   # Path to GeoPackage
-population_col = "beftotalt"            # Population column in the GPKG
-
+gpkg_path = "population_1km_2024.gpkg"  # Path to GeoPackage
+population_col = "beftotalt"  # Population column in the GPKG
 # -------------------------------------------------------------------
 # 0. Imports
 # -------------------------------------------------------------------
-import geopandas as gpd                  # Spatial data
-import matplotlib.pyplot as plt          # Plotting
+import geopandas as gpd  # Spatial data
+import matplotlib.pyplot as plt  # Plotting
 from matplotlib.widgets import Slider, Button, TextBox
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.gridspec import GridSpec
 import numpy as np
 import random
-
 # -------------------------------------------------------------------
 # 1. Load data and prepare grid
 # -------------------------------------------------------------------
-
 # NOTE: we do NOT fix a random seed, so each "Randomize" run is different.
 # You can uncomment the next line to make results reproducible.
 # np.random.seed(42)
@@ -47,13 +38,9 @@ gdf = gpd.read_file(gpkg_path)
 gdf[population_col] = gdf[population_col].astype(float).fillna(0.0)
 
 # Store the population in a convenient column
-gdf["total"] = gdf[population_col].astype(float)
-
-# Population per cell as integers
+gdf["total"] = gdf[population_col].astype(float)  # Population per cell as integers
 total_pop = gdf["total"].values
-N = np.round(total_pop).astype(int)
-
-# Number of grid cells
+N = np.round(total_pop).astype(int)  # Number of grid cells
 num_cells = len(gdf)
 
 # Clip any negative populations (should not happen, but be safe)
@@ -66,16 +53,13 @@ if N_total == 0:
 
 # Safe version of N to avoid division by zero in I/N
 N_safe = np.where(N > 0, N, 1)
-
 # -------------------------------------------------------------------
 # 2. Seed cells (fixed starting locations)
-#    - Choose ~4% of non-zero cells around a target population (e.g. cities)
-#    - In those cells, infect 1–5% of people on day 1
+# - Choose ~4% of non-zero cells around a target population (e.g. cities)
+# - In those cells, infect 1–5% of people on day 1
 # -------------------------------------------------------------------
-
 nonzero_mask = N > 0
 nonzero_indices = np.where(nonzero_mask)[0]
-
 if len(nonzero_indices) == 0:
     raise ValueError("All cells have zero population; cannot simulate epidemic.")
 
@@ -96,70 +80,54 @@ sorted_nonzero_indices = nonzero_indices[sorted_idx]
 
 # Final list of seed cell indices (fixed set for the whole session)
 seed_indices = sorted_nonzero_indices[:num_seed_cells]
-
 # -------------------------------------------------------------------
 # 3. Epidemiological parameters (COVID‑19: ancestral strain)
 # -------------------------------------------------------------------
-# All parameters are per day and refer to a simple SIRD model with
+# All parameters are per day and refer to a simple SIR model with
 # waning immunity and optional lockdown.
-
 # --- Disease severity: IFR and infectious period --------------------
-
 # Population-average infection fatality ratio (IFR) for COVID‑19
 # Meyerowitz‑Katz & Merone (2020, Int J Infect Dis) meta-analysis:
 # IFR ≈ 0.68% (0.0068 as probability)
 infection_fatality_ratio = 0.0068
-
 # Mean infectious period (duration of being contagious), in days.
 # Scoping reviews of viral shedding & infectiousness suggest 7–9 days;
 # we use 7 days as a simple, widely used assumption.
 infectious_period = 7.0  # days
 
-# People leave the infectious compartment (by recovery or death) at rate:
+# People leave the infectious compartment (by recovery or death) at rate: exit_rate
 exit_rate = 1.0 / infectious_period  # ≈ 0.1429 / day
-
-# Split exits into recovery and death so that IFR = mu / (gamma + mu)
-mu = infection_fatality_ratio * exit_rate          # death hazard per day
-gamma = exit_rate - mu                             # recovery hazard per day
-
+# Split exits into recovery so that IFR = mu / gamma
+mu = infection_fatality_ratio * exit_rate  # death hazard per day
+gamma = exit_rate - mu  # recovery hazard per day
 # --- Transmission: R0 and beta --------------------------------------
-
 # Basic reproduction number R0 for early COVID‑19 (ancestral strain),
 # pooled estimate ≈ 2.8–3.0 in meta-analyses and Western Europe models.
-R0_local = 2.8
-
-# Local transmission rate beta (within each cell)
+R0_local = 2.8  # Local transmission rate
 beta_local = R0_local * gamma  # ≈ 0.40 per day
 
 # Small global mixing component: long-distance travel, commuting, etc.
 # Kept at 5% of local beta so that most infections are local.
 beta_global = 0.05 * beta_local
-
 # --- Waning immunity: R -> S ----------------------------------------
-
 # Typical duration of protection after infection (pre-Omicron) is
 # of order one year or more; we choose 365 days.
 waning_immunity_days = 244.0
 alpha = 1.0 / waning_immunity_days  # probability per day that R -> S
-
 # --- Lockdown / NPI parameters --------------------------------------
-
-# use_lockdown     : whether we apply a period of reduced contacts
+# use_lockdown : whether we apply a period of reduced contacts
 # lockdown_start_day : first day with reduced contacts
-# lockdown_duration  : length of that period in days
+# lockdown_duration : length of that period in days
 # lockdown_contact_factor : multiplier for beta during lockdown
 #
 # Literature suggests strict combined NPIs can reduce R by ~60–80%.
 # We choose 0.35 by default (about 65% contact reduction). A value of
 # 0.25 would represent a strict lockdown; 0.6–0.7 a Swedish-style mild NPI.
-
 use_lockdown = True
-lockdown_start_day = 60        # e.g. day 60 after simulation start
-lockdown_duration = 120        # ~4 months
-lockdown_contact_factor = 0.7 # 65% reduction in contacts
-
+lockdown_start_day = 15  # e.g. day 60 after simulation start
+lockdown_duration = 120  # ~4 months
+lockdown_contact_factor = 0.7  # 65% reduction in contacts
 # --- Global mixing weights (population dependent) -------------------
-
 # Normalize population by its maximum to [0,1]
 if N.max() > 0:
     pop_norm = N / N.max()
@@ -171,58 +139,45 @@ pop_weight_for_global = np.sqrt(pop_norm)
 
 # Simulation horizon in days (0..max_days)
 max_days = 1247
-
 # -------------------------------------------------------------------
-# 4. Simulation function: one stochastic SIRD realization
+# 4. Simulation function: one stochastic SIR realization
 # -------------------------------------------------------------------
 def simulate():
+    """ Run one stochastic SIR simulation over all cells and all days. Returns a dictionary with:
+    S_hist, I_hist, R_hist : (day, cell) arrays
+    total_S, total_I, total_R : totals over Sweden per day
+    days : array [0..max_days]
+    num_days : max_days + 1
+    infected_max : 99th percentile of infected count-s for map scaling
+    extinction_day: first day when total_I returns to 0 (if any)
     """
-    Run one stochastic SIRD simulation over all cells and all days.
-
-    Returns a dictionary with:
-        S_hist, I_hist, R_hist, D_hist : (day, cell) arrays
-        total_S, total_I, total_R, total_D : totals over Sweden per day
-        days          : array [0..max_days]
-        num_days      : max_days + 1
-        infected_max  : 99th percentile of infected count-s for map scaling
-        extinction_day: first day when total_I returns to 0 (if any)
-    """
-
     # --- Day 0: everyone susceptible, no infection -------------------
     S0 = N.copy()
     I0 = np.zeros_like(N, dtype=int)
     R0 = np.zeros_like(N, dtype=int)
-    D0 = np.zeros_like(N, dtype=int)
-
     S_hist = [S0.copy()]
     I_hist = [I0.copy()]
     R_hist = [R0.copy()]
-    D_hist = [D0.copy()]
 
     # --- Day 1: seed infections in the chosen high-population cells --
     S = S0.copy()
     I = I0.copy()
     R = R0.copy()
-    D = D0.copy()
 
-    # Random initial infected fraction (1–5%) in each seed cell
-    initial_infected_fraction = np.random.uniform(0.01, 0.05, size=len(seed_indices))
-
+    # Start with a very low initial infected fraction (e.g., 0.001 for 0.1%)
+    initial_infected_fraction = np.random.uniform(0.0001, 0.001, size=len(seed_indices))
     for idx, frac in zip(seed_indices, initial_infected_fraction):
-        new_inf = int(round(frac * N[idx]))
-        new_inf = max(new_inf, 1)        # at least 1 if possible
-        new_inf = min(new_inf, S[idx])   # not more than susceptibles
+        new_inf = int(round(frac * N[idx]))  # infect a small number
+        new_inf = max(new_inf, 1)  # at least 1 if possible
+        new_inf = min(new_inf, S[idx])  # not more than susceptibles
         S[idx] -= new_inf
         I[idx] += new_inf
-
     S_hist.append(S.copy())
     I_hist.append(I.copy())
     R_hist.append(R.copy())
-    D_hist.append(D.copy())
 
-    # --- Days 2..max_days: SIRD dynamics -----------------------------
+    # --- Days 2..max_days: SIR dynamics -----------------------------
     for day in range(2, max_days + 1):
-
         # Default contacts (no lockdown)
         contact_factor = 1.0
 
@@ -240,7 +195,6 @@ def simulate():
 
         # Local prevalence I/N per cell
         prevalence_local = I / N_safe
-
         # Local infection intensity and probability
         lambda_local = beta_local_eff * prevalence_local
         p_local = 1.0 - np.exp(-lambda_local)
@@ -255,47 +209,34 @@ def simulate():
         p_inf = np.clip(p_local + p_global, 0.0, 1.0)
 
         # New infections: S -> I
-        new_infections = np.random.binomial(S, p_inf)
+        new_infections = np.random.binomial(S.astype(int), p_inf)
+
+        # Gradually increase the infection intensity by scaling up in early days
+        if day <= 7:
+            new_infections = np.floor(new_infections * 0.1)  # scale down for first 7 days
 
         # Recoveries: I -> R
-        new_recoveries = np.random.binomial(I, gamma)
-
-        # Subtract recovered from I before applying deaths
-        I_after_rec = I - new_recoveries
-
-        # Deaths: I -> D
-        new_deaths = np.random.binomial(I_after_rec, mu)
-
-        # Remaining infected after recoveries and deaths
-        I_after_rec_death = I_after_rec - new_deaths
-
-        # Waning immunity: R -> S
-        new_S_from_R = np.random.binomial(R, alpha)
+        new_recoveries = np.random.binomial(I.astype(int), gamma)
 
         # Update compartments
-        S = S - new_infections + new_S_from_R
-        I = I_after_rec_death + new_infections
-        R = R + new_recoveries - new_S_from_R
-        D = D + new_deaths
+        S = S - new_infections
+        I = I + new_infections - new_recoveries
+        R = R + new_recoveries
 
         S_hist.append(S.copy())
         I_hist.append(I.copy())
         R_hist.append(R.copy())
-        D_hist.append(D.copy())
 
-    # --- Convert histories to arrays ---------------------------------
+    # Convert histories to arrays
     S_hist = np.array(S_hist)
     I_hist = np.array(I_hist)
     R_hist = np.array(R_hist)
-    D_hist = np.array(D_hist)
-
     num_days = S_hist.shape[0]
     days = np.arange(num_days)
 
     total_S = S_hist.sum(axis=1)
     total_I = I_hist.sum(axis=1)
     total_R = R_hist.sum(axis=1)
-    total_D = D_hist.sum(axis=1)
 
     # Ensure total_I[0] is exactly 0
     total_I[0] = 0
@@ -313,7 +254,6 @@ def simulate():
         infected_max = int(np.ceil(np.percentile(positive_vals, 99)))
     else:
         infected_max = 1
-
     if infected_max < 1:
         infected_max = 1
 
@@ -321,11 +261,9 @@ def simulate():
         "S_hist": S_hist,
         "I_hist": I_hist,
         "R_hist": R_hist,
-        "D_hist": D_hist,
         "total_S": total_S,
         "total_I": total_I,
         "total_R": total_R,
-        "total_D": total_D,
         "days": days,
         "num_days": num_days,
         "infected_max": infected_max,
@@ -334,85 +272,54 @@ def simulate():
 
 # Run one simulation to initialize plots
 sim_data = simulate()
-
 # -------------------------------------------------------------------
 # 5. Prepare initial map (day 0 infections = 0)
 # -------------------------------------------------------------------
 gdf["infected"] = sim_data["I_hist"][0].astype(float)
-
 # -------------------------------------------------------------------
 # 6. Figure layout with GridSpec (map + time series)
 # -------------------------------------------------------------------
 fig = plt.figure(figsize=(15, 6))
 gs = GridSpec(1, 2, width_ratios=[1.1, 1.4], wspace=0.3, figure=fig)
-
 ax_map = fig.add_subplot(gs[0, 0])
 ax_ts = fig.add_subplot(gs[0, 1])
-
 plt.subplots_adjust(bottom=0.26)
-
 dark_gray = "#222222"
 lighter_gray = "#333333"
-
 fig.patch.set_facecolor(dark_gray)
 ax_map.set_facecolor(dark_gray)
 ax_ts.set_facecolor(lighter_gray)
-
 # -------------------------------------------------------------------
 # 7. Map: black → yellow → red colormap + colorbar
 # -------------------------------------------------------------------
 cmap = LinearSegmentedColormap.from_list(
-    "black_yellow_red",
-    ["#000000", "#ffff00", "#ff0000"]
+    "black_yellow_red", ["#000000", "#ffff00", "#ff0000"]
 )
-
 infected_max = sim_data["infected_max"]
-
 gdf.plot(
-    column="infected",
-    ax=ax_map,
-    cmap=cmap,
-    vmin=0.0,
-    vmax=infected_max,
-    linewidth=0,
-    edgecolor="none"
+    column="infected", ax=ax_map, cmap=cmap, vmin=0.0, vmax=infected_max, linewidth=0, edgecolor="none"
 )
-
 ax_map.set_title("Infected map", color="white")
 ax_map.set_axis_off()
-
 map_collection = ax_map.collections[0]
-
-sm = plt.cm.ScalarMappable(
-    cmap=cmap,
-    norm=plt.Normalize(vmin=0.0, vmax=infected_max)
-)
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max))
 sm._A = []
-
-cbar = fig.colorbar(sm, ax=ax_map, fraction=0.05, pad=0.02)
+cbar = plt.colorbar(sm, ax=ax_map, fraction=0.05, pad=0.02)
 cbar.set_label("Infected count", color="white")
 cbar.outline.set_edgecolor("white")
 plt.setp(cbar.ax.get_yticklabels(), color="white")
-
 # -------------------------------------------------------------------
-# 8. SIRD time series plot + lockdown shading
+# 8. SIR time series plot + lockdown shading
 # -------------------------------------------------------------------
-line_S, = ax_ts.plot(sim_data["days"], sim_data["total_S"],
-                     label="S", color="#1f77b4")
-line_I, = ax_ts.plot(sim_data["days"], sim_data["total_I"],
-                     label="I", color="#ff7f0e")
-line_R, = ax_ts.plot(sim_data["days"], sim_data["total_R"],
-                     label="R", color="#2ca02c")
-line_D, = ax_ts.plot(sim_data["days"], sim_data["total_D"],
-                     label="D", color="#aa00ff")
-
+line_S, = ax_ts.plot(sim_data["days"], sim_data["total_S"], label="S", color="#1f77b4")
+line_I, = ax_ts.plot(sim_data["days"], sim_data["total_I"], label="I", color="#ff7f0e")
+line_R, = ax_ts.plot(sim_data["days"], sim_data["total_R"], label="R", color="#2ca02c")
 ax_ts.set_xlabel("Day", color="white")
 ax_ts.set_ylabel("Number of individuals", color="white")
-ax_ts.set_title("Spatial SIRD model for COVID‑19", color="white")
-
-ax_ts.set_ylim(0, N_total)
-ax_ts.set_xlim(0, max_days)
-
+ax_ts.set_title("Spatial SIR model for COVID‑19", color="white")
+ax_ts.set_ylim(0, N_total)  # Adjust xlim based on extinction day
+extinction_day = sim_data["extinction_day"]
+ax_ts.set_xlim(0, extinction_day if extinction_day is not None else max_days)
 ax_ts.tick_params(colors="white")
 for spine in ax_ts.spines.values():
     spine.set_color("white")
@@ -424,9 +331,8 @@ if use_lockdown:
         lockdown_start_day,
         lockdown_start_day + lockdown_duration,
         color="gray",
-        alpha=0.15
+        alpha=0.15,
     )
-
 legend = ax_ts.legend(facecolor="#333333", edgecolor="none")
 for text in legend.get_texts():
     text.set_color("white")
@@ -441,25 +347,20 @@ def format_extinction(ext_day):
         return f"Extinction day: {ext_day}"
 
 extinction_text = ax_ts.text(
-    0.02, 0.95, format_extinction(sim_data["extinction_day"]),
+    0.02,
+    0.95,
+    format_extinction(sim_data["extinction_day"]),
     transform=ax_ts.transAxes,
     color="white",
     fontsize=9,
-    va="top"
+    va="top",
 )
-
 # -------------------------------------------------------------------
 # 9. Day slider (0..max_days)
 # -------------------------------------------------------------------
 ax_slider = fig.add_axes([0.10, 0.16, 0.45, 0.03])
 day_slider = Slider(
-    ax=ax_slider,
-    label="Day",
-    valmin=0,
-    valmax=max_days,
-    valinit=0,
-    valstep=1,
-    color="#444444"
+    ax=ax_slider, label="Day", valmin=0, valmax=max_days, valinit=0, valstep=1, color="#444444"
 )
 day_slider.label.set_color("white")
 day_slider.valtext.set_color("white")
@@ -467,17 +368,13 @@ day_slider.valtext.set_color("white")
 def update_slider(day_value):
     """Update map, vertical line, and TextBox when slider moves."""
     global sim_data
-
     day_idx = int(day_value)
     day_idx = max(0, min(sim_data["num_days"] - 1, day_idx))
-
     current_I = sim_data["I_hist"][day_idx].astype(float)
     gdf["infected"] = current_I
     map_collection.set_array(current_I)
-
     vline.set_xdata([day_idx, day_idx])
     day_box.set_val(str(day_idx))
-
     fig.canvas.draw_idle()
 
 day_slider.on_changed(update_slider)
@@ -488,7 +385,6 @@ day_slider.on_changed(update_slider)
 ax_daybox = fig.add_axes([0.10, 0.08, 0.16, 0.045])
 ax_daybox.set_facecolor("white")
 day_box = TextBox(ax_daybox, "Select day", initial="0")
-
 day_box.label.set_color("white")
 day_box.text_disp.set_color("black")
 
@@ -501,49 +397,36 @@ def submit_day(text):
     day_slider.set_val(val)
 
 day_box.on_submit(submit_day)
-
 # -------------------------------------------------------------------
 # 11. Helpers to refresh plots after re-simulating
 # -------------------------------------------------------------------
-def update_extinction_text():
-    extinction_text.set_text(format_extinction(sim_data["extinction_day"]))
-
 def apply_simulation_to_plots():
-    """Update map, SIRD curves and color scale based on current sim_data."""
+    """Update map, SIR curves and color scale based on current sim_data."""
     line_S.set_data(sim_data["days"], sim_data["total_S"])
     line_I.set_data(sim_data["days"], sim_data["total_I"])
     line_R.set_data(sim_data["days"], sim_data["total_R"])
-    line_D.set_data(sim_data["days"], sim_data["total_D"])
-
     ax_ts.set_xlim(0, max_days)
     ax_ts.set_ylim(0, N_total)
-
     day0_I = sim_data["I_hist"][0].astype(float)
     gdf["infected"] = day0_I
     map_collection.set_array(day0_I)
-
     new_max = sim_data["infected_max"]
     if new_max <= 0:
         new_max = 1
     sm.set_clim(0.0, new_max)
     map_collection.set_clim(0.0, new_max)
     cbar.update_normal(sm)
-
     update_extinction_text()
-
     day_slider.set_val(0)
     day_box.set_val("0")
     vline.set_xdata([0, 0])
-
     fig.canvas.draw_idle()
-
 # -------------------------------------------------------------------
 # 12. Control buttons: <, >, Play/Pause, Randomize, Reset
 # -------------------------------------------------------------------
 button_color = "#333333"
 hover_color = "#555555"
 text_color = "white"
-
 is_playing = False  # global flag for animation
 
 def step_day(delta):
@@ -575,8 +458,7 @@ btn_next.on_clicked(on_next)
 
 # "Play/Pause" button
 ax_play_pause = fig.add_axes([0.70, 0.16, 0.08, 0.04])
-btn_play_pause = Button(ax_play_pause, "Play",
-                        color=button_color, hovercolor=hover_color)
+btn_play_pause = Button(ax_play_pause, "Play", color=button_color, hovercolor=hover_color)
 btn_play_pause.label.set_color(text_color)
 
 def on_play_pause(event):
@@ -587,7 +469,6 @@ def on_play_pause(event):
     else:
         is_playing = True
         btn_play_pause.label.set_text("Pause")
-
     start = int(day_slider.val)
     for d in range(start, max_days + 1):
         if not is_playing:
@@ -600,8 +481,7 @@ btn_play_pause.on_clicked(on_play_pause)
 
 # "Randomize" button: new simulation with same seed cells
 ax_rand = fig.add_axes([0.58, 0.08, 0.20, 0.045])
-btn_rand = Button(ax_rand, "Randomize",
-                  color=button_color, hovercolor=hover_color)
+btn_rand = Button(ax_rand, "Randomize", color=button_color, hovercolor=hover_color)
 btn_rand.label.set_color(text_color)
 
 def on_randomize(event):
@@ -615,8 +495,7 @@ btn_rand.on_clicked(on_randomize)
 
 # "Reset" button: back to day 0 for current simulation
 ax_reset = fig.add_axes([0.80, 0.08, 0.08, 0.045])
-btn_reset = Button(ax_reset, "Reset",
-                   color=button_color, hovercolor=hover_color)
+btn_reset = Button(ax_reset, "Reset", color=button_color, hovercolor=hover_color)
 btn_reset.label.set_color(text_color)
 
 def on_reset(event):
