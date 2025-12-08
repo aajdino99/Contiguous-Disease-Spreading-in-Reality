@@ -139,7 +139,7 @@ beta_global = 0.05 * beta_local
 
 # Typical duration of protection after infection (pre-Omicron) is
 # of order one year or more; we choose 365 days.
-waning_immunity_days = 365.0
+waning_immunity_days = 244.0
 alpha = 1.0 / waning_immunity_days  # probability per day that R -> S
 
 # --- Lockdown / NPI parameters --------------------------------------
@@ -156,7 +156,7 @@ alpha = 1.0 / waning_immunity_days  # probability per day that R -> S
 use_lockdown = True
 lockdown_start_day = 60        # e.g. day 60 after simulation start
 lockdown_duration = 120        # ~4 months
-lockdown_contact_factor = 0.35 # 65% reduction in contacts
+lockdown_contact_factor = 0.7 # 65% reduction in contacts
 
 # --- Global mixing weights (population dependent) -------------------
 
@@ -184,7 +184,7 @@ def simulate():
         total_S, total_I, total_R, total_D : totals over Sweden per day
         days          : array [0..max_days]
         num_days      : max_days + 1
-        infected_max  : 99th percentile of infected counts for map scaling
+        infected_max  : 99th percentile of infected count-s for map scaling
         extinction_day: first day when total_I returns to 0 (if any)
     """
 
