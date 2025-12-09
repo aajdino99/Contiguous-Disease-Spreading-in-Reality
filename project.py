@@ -79,13 +79,13 @@ use_lockdown = True
 
 # 1. Infection Thresholds (% of total population)
 lockdown_trigger_start = 2.0  # Start if > % infected
-lockdown_trigger_end = 1.5    # End if < % infected
+lockdown_trigger_end = 0.8    # End if < % infected
 
 # 2. Stability Constraints (prevent rapid switching)
 min_lockdown_duration = 21    # Once started, must last at least 3 weeks
 min_cooldown_duration = 14    # Once ended, cannot restart for 2 weeks
 
-lockdown_contact_factor = 0.2 # % reduction
+lockdown_contact_factor = 0.2  # % reduction
 
 # --- Global mixing weights ------------------------------------------
 if N.max() > 0:
