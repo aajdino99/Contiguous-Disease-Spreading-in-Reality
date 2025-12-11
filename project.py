@@ -272,7 +272,7 @@ map_collection = ax_map.collections[0]
 sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max))
 sm._A = []
 cbar = plt.colorbar(sm, ax=ax_map, fraction=0.05, pad=0.02)
-cbar.ax.set_visible(False)  # hide the colorbar
+cbar.ax.set_visible(True)  # show/hide the colorbar
 cbar.set_label("Infected count", color="white")
 cbar.outline.set_edgecolor("white")
 plt.setp(cbar.ax.get_yticklabels(), color="white")
@@ -291,11 +291,15 @@ ax_ts.tick_params(colors="white")
 for spine in ax_ts.spines.values(): spine.set_color("white")
 ax_ts.grid(color="gray", alpha=0.3)
 
-legend = ax_ts.legend(facecolor="#333333", edgecolor="none")
-for text in legend.get_texts(): text.set_color("white")
+# Legend setup with initial values
+legend = ax_ts.legend(facecolor="#333333", edgecolor="none", loc="upper right")
+for text in legend.get_texts(): 
+    text.set_color("white")
 
 vline = ax_ts.axvline(0, linestyle="--", color="white", alpha=0.7)
 extinction_text = ax_ts.text(0.02, 0.95, "", transform=ax_ts.transAxes, color="white", fontsize=9, va="top")
+# New Lockdown text indicator
+lockdown_text = ax_ts.text(0.02, 0.88, "", transform=ax_ts.transAxes, color="#ff4444", fontsize=12, fontweight="bold", va="top")
 
 lockdown_spans = []
 
@@ -338,6 +342,31 @@ def update_slider(day_value):
     map_collection.set_array(current_I)
     vline.set_xdata([day_idx, day_idx])
     day_box.set_val(str(day_idx))
+    
+    # Update legend text with current S, I, R values
+    val_S = int(sim_data["total_S"][day_idx])
+    val_I = int(sim_data["total_I"][day_idx])
+    val_R = int(sim_data["total_R"][day_idx])
+    
+    if legend:
+        texts = legend.get_texts()
+        if len(texts) >= 3:
+            texts[0].set_text(f"S: {val_S:,}")
+            texts[1].set_text(f"I: {val_I:,}")
+            texts[2].set_text(f"R: {val_R:,}")
+
+    # Check and update lockdown status text
+    is_locked = False
+    for start, end in sim_data["lockdown_intervals"]:
+        if start <= day_idx < end:
+            is_locked = True
+            break
+    
+    if is_locked:
+        lockdown_text.set_text("LOCKDOWN")
+    else:
+        lockdown_text.set_text("")
+
     fig.canvas.draw_idle()
 
 day_slider.on_changed(update_slider)
@@ -387,6 +416,10 @@ def apply_simulation_to_plots():
     day_slider.set_val(0)
     day_box.set_val("0")
     vline.set_xdata([0, 0])
+    
+    # Initialize legend and text for Day 0
+    update_slider(0) 
+    
     fig.canvas.draw_idle()
 
 # -------------------------------------------------------------------
@@ -441,5 +474,8 @@ ax_reset = fig.add_axes([0.80, 0.08, 0.08, 0.045])
 btn_reset = Button(ax_reset, "Reset", color=button_color, hovercolor=hover_color)
 btn_reset.label.set_color(text_color)
 btn_reset.on_clicked(lambda e: (globals().update(is_playing=False), day_slider.set_val(0), day_box.set_val("0")))
+
+# Initial call to set legend and text values correctly on startup
+update_slider(0)
 
 plt.show()
