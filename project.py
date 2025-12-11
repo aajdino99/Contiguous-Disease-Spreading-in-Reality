@@ -78,8 +78,8 @@ alpha = 1.0 / waning_immunity_days
 use_lockdown = True
 
 # 1. Infection Thresholds (% of total population)
-lockdown_trigger_start = 2.0  # Start if > % infected
-lockdown_trigger_end = 0.8    # End if < % infected
+lockdown_trigger_start = 5.0  # Start if > % infected
+lockdown_trigger_end = 2.0    # End if < % infected
 
 # 2. Stability Constraints (prevent rapid switching)
 min_lockdown_duration = 21    # Once started, must last at least 3 weeks
@@ -92,7 +92,7 @@ if N.max() > 0:
     pop_norm = N / N.max()
 else:
     pop_norm = np.zeros_like(N, dtype=float)
-pop_weight_for_global = np.sqrt(pop_norm)
+pop_weight_for_global = np.sqrt(pop_norm) 
 
 max_days = 1247
 
@@ -272,6 +272,7 @@ map_collection = ax_map.collections[0]
 sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max))
 sm._A = []
 cbar = plt.colorbar(sm, ax=ax_map, fraction=0.05, pad=0.02)
+cbar.ax.set_visible(False)  # hide the colorbar
 cbar.set_label("Infected count", color="white")
 cbar.outline.set_edgecolor("white")
 plt.setp(cbar.ax.get_yticklabels(), color="white")
