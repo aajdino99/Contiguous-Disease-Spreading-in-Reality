@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*- 
-""" Spatial SIR model for COVID‑19 on a 1 km grid over Sweden. 
+""" Spatial SIR model for COVID-19 on a 1 km grid over Sweden. 
 - Each cell of the GeoPackage 'population_1km_2024.gpkg' is one metapopulation. 
 - Compartments per cell: S, I, R (with waning immunity R -> S). 
 - DYNAMIC LOCKDOWN with STABILITY:
     - Triggers based on infection % thresholds.
     - Enforces MINIMUM DURATION and COOLDOWN periods to prevent rapid toggling.
+*** MODIFIED: Now runs 20 simulations and plots the mean time series. ***
 """
 
 gpkg_path = "population_1km_2024.gpkg"  # Path to GeoPackage
 population_col = "beftotalt"  # Population column in the GPKG
+NUM_SIMULATIONS = 20 # <<<--- MODIFIED: Number of runs
 # -------------------------------------------------------------------
 # 0. Imports
 # -------------------------------------------------------------------
@@ -26,7 +28,15 @@ import random
 # np.random.seed(42) 
 
 # Read the 1 km population grid for Sweden
-gdf = gpd.read_file(gpkg_path)
+# NOTE: GeoPackage loading may fail if the file is not present.
+try:
+    gdf = gpd.read_file(gpkg_path)
+except Exception as e:
+    print(f"Error loading GeoPackage: {e}")
+    print("Please ensure 'population_1km_2024.gpkg' is in the current directory.")
+    # For a clean environment, you may want to re-raise the error here or use dummy data.
+    raise 
+    
 gdf[population_col] = gdf[population_col].astype(float).fillna(0.0)
 gdf["total"] = gdf[population_col].astype(float)
 total_pop = gdf["total"].values
@@ -82,8 +92,8 @@ lockdown_trigger_start = 4  # Start if > % infected
 lockdown_trigger_end = 1    # End if < % infected
 
 # 2. Stability Constraints (prevent rapid switching)
-min_lockdown_duration = 42    # Once started, must last at least 3 weeks (~5–7 days infectious period + lags in the model, anything shorter than 2 weeks tends to barely dent the curve. 3 weeks is a common policy length in many real-world waves.)
-min_cooldown_duration = 21    # Once ended, cannot restart for 2 weeks (roughly matches one generation of infection + detection + policy reaction. It avoids immediate re-locking on noisy fluctuations)
+min_lockdown_duration = 42  
+min_cooldown_duration = 21    
 
 lockdown_contact_factor = 0.25 # % reduction
 
@@ -95,6 +105,7 @@ else:
 pop_weight_for_global = np.sqrt(pop_norm) 
 
 max_days = 1247
+num_days_hist = max_days + 1 # For history array size
 
 # -------------------------------------------------------------------
 # 4. Simulation function: Dynamic Lockdown with Stability
@@ -148,16 +159,12 @@ def simulate():
         if use_lockdown:
             if lockdown_active:
                 # CURRENTLY LOCKED DOWN
-                # Rule 1: Must exceed minimum duration
-                # Rule 2: Infection must drop below end threshold
                 if days_in_current_state >= min_lockdown_duration:
                     if pct_infected < lockdown_trigger_end:
                         lockdown_active = False
                         last_state_change_day = day
             else:
                 # CURRENTLY OPEN
-                # Rule 1: Must exceed cooldown duration
-                # Rule 2: Infection must rise above start threshold
                 if days_in_current_state >= min_cooldown_duration:
                     if pct_infected > lockdown_trigger_start:
                         lockdown_active = True
@@ -185,6 +192,7 @@ def simulate():
         new_infections = np.random.binomial(S.astype(int), p_inf)
 
         if day <= 7:
+            # Reduce early-day infections to mitigate simulation explosion artifact
             new_infections = np.floor(new_infections * 0.1)
 
         new_recoveries = np.random.binomial(I.astype(int), gamma)
@@ -198,9 +206,10 @@ def simulate():
         R_hist.append(R.copy())
 
     # --- Post-Processing ---
-    S_hist = np.array(S_hist)
-    I_hist = np.array(I_hist)
-    R_hist = np.array(R_hist)
+    # Explicitly cast to int32 to halve the memory footprint from 64-bit floats
+    S_hist = np.array(S_hist, dtype=np.int32)
+    I_hist = np.array(I_hist, dtype=np.int32)
+    R_hist = np.array(R_hist, dtype=np.int32)
     num_days = S_hist.shape[0]
     days = np.arange(num_days)
 
@@ -214,6 +223,9 @@ def simulate():
         if total_I[d] == 0:
             extinction_day = d
             break
+
+    # NEW: Calculate peak infection day
+    peak_I_day = np.argmax(total_I)
 
     positive_vals = I_hist[I_hist > 0]
     infected_max = int(np.ceil(np.percentile(positive_vals, 99))) if positive_vals.size > 0 else 1
@@ -236,15 +248,96 @@ def simulate():
         "total_S": total_S, "total_I": total_I, "total_R": total_R,
         "days": days, "num_days": num_days,
         "infected_max": infected_max, "extinction_day": extinction_day,
+        "peak_I_day": peak_I_day, # NEW: Include peak day
         "lockdown_intervals": lockdown_intervals
     }
 
-sim_data = simulate()
+# -------------------------------------------------------------------
+# 4.5. Run multiple simulations and calculate statistics
+# -------------------------------------------------------------------
+
+all_S, all_I, all_R = [], [], []
+all_sim_data = []
+extinction_days = []
+peak_I_days = [] # NEW: List to store peak infection day for each run
+
+print(f"Running {NUM_SIMULATIONS} stochastic simulations...")
+for i in range(NUM_SIMULATIONS):
+    # Set a unique seed for each run for stochasticity
+    np.random.seed(i) 
+    result = simulate()
+    all_sim_data.append(result)
+    all_S.append(result["total_S"])
+    all_I.append(result["total_I"])
+    all_R.append(result["total_R"])
+    # Collect extinction day
+    if result["extinction_day"] is not None:
+        extinction_days.append(result["extinction_day"])
+    # NEW: Collect peak infection day
+    if result["peak_I_day"] is not None:
+        peak_I_days.append(result["peak_I_day"])
+print("Simulations complete.")
+
+# CALCULATE MEAN EXTINCTION DAY
+mean_extinction_day = None
+if extinction_days:
+    mean_extinction_day = int(np.mean(extinction_days))
+
+# NEW: CALCULATE MEAN PEAK INFECTION DAY
+mean_peak_day = None
+if peak_I_days:
+    mean_peak_day = int(np.mean(peak_I_days))
+    
+# Pad histories to the maximum number of days if any run finished early (extinction)
+max_len = max(len(h) for h in all_S)
+def pad_history(history, compartment, max_len, N_total):
+    padded = np.full(max_len, np.nan)
+    current_len = len(history)
+    padded[:current_len] = history
+    # For S, I, R, if a run ended early, the last value remains constant (extinct state)
+    if current_len < max_len:
+        if compartment == 'S':
+            # S stops decreasing at the end
+            padded[current_len:] = history[-1]
+        elif compartment == 'I':
+            # I drops to 0 at extinction
+            padded[current_len:] = 0
+        elif compartment == 'R':
+            # R stops increasing at the end
+            padded[current_len:] = history[-1]
+    return padded
+
+all_S_padded = np.array([pad_history(h, 'S', max_len, N_total) for h in all_S])
+all_I_padded = np.array([pad_history(h, 'I', max_len, N_total) for h in all_I])
+all_R_padded = np.array([pad_history(h, 'R', max_len, N_total) for h in all_R])
+
+# Calculate Mean, 2.5th and 97.5th percentiles (95% confidence interval)
+mean_S = np.nanmean(all_S_padded, axis=0)
+mean_I = np.nanmean(all_I_padded, axis=0)
+mean_R = np.nanmean(all_R_padded, axis=0)
+
+percentile_S_low = np.nanpercentile(all_S_padded, 2.5, axis=0)
+percentile_I_low = np.nanpercentile(all_I_padded, 2.5, axis=0)
+percentile_R_low = np.nanpercentile(all_R_padded, 2.5, axis=0)
+
+percentile_S_high = np.nanpercentile(all_S_padded, 97.5, axis=0)
+percentile_I_high = np.nanpercentile(all_I_padded, 97.5, axis=0)
+percentile_R_high = np.nanpercentile(all_R_padded, 97.5, axis=0)
+
+# Overwrite sim_data with the results from the first run for map/interactive use
+sim_data = all_sim_data[0] 
+sim_data['total_S'] = mean_S
+sim_data['total_I'] = mean_I
+sim_data['total_R'] = mean_R
+sim_data['num_days'] = max_len
+sim_data['days'] = np.arange(max_len)
+
 
 # -------------------------------------------------------------------
-# 5. Prepare initial map
+# 5. Prepare initial map (using first run's day 0)
 # -------------------------------------------------------------------
-gdf["infected"] = sim_data["I_hist"][0].astype(float)
+gdf["infected"] = all_sim_data[0]["I_hist"][0].astype(float)
+infected_max_single_run = all_sim_data[0]["infected_max"]
 
 # -------------------------------------------------------------------
 # 6. Figure layout
@@ -264,28 +357,57 @@ ax_ts.set_facecolor(lighter_gray)
 # 7. Map
 # -------------------------------------------------------------------
 cmap = LinearSegmentedColormap.from_list("black_yellow_red", ["#000000", "#ffff00", "#ff0000"])
-infected_max = sim_data["infected_max"]
-gdf.plot(column="infected", ax=ax_map, cmap=cmap, vmin=0.0, vmax=infected_max, linewidth=0, edgecolor="none")
-ax_map.set_title("Infected map", color="white")
+gdf.plot(column="infected", ax=ax_map, cmap=cmap, vmin=0.0, vmax=infected_max_single_run, linewidth=0, edgecolor="none")
+ax_map.set_title(f"Infected map (Run 1)", color="white")
 ax_map.set_axis_off()
 map_collection = ax_map.collections[0]
-sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max))
+sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max_single_run))
 sm._A = []
 cbar = plt.colorbar(sm, ax=ax_map, fraction=0.05, pad=0.02)
-cbar.ax.set_visible(True)  # show/hide the colorbar
-cbar.set_label("Infected count", color="white")
+cbar.ax.set_visible(True) 
+cbar.set_label("Infected count (Run 1)", color="white")
 cbar.outline.set_edgecolor("white")
 plt.setp(cbar.ax.get_yticklabels(), color="white")
 
 # -------------------------------------------------------------------
 # 8. SIR time series plot + Lockdown Shading
 # -------------------------------------------------------------------
-line_S, = ax_ts.plot(sim_data["days"], sim_data["total_S"], label="S", color="#1f77b4")
-line_I, = ax_ts.plot(sim_data["days"], sim_data["total_I"], label="I", color="#ff7f0e")
-line_R, = ax_ts.plot(sim_data["days"], sim_data["total_R"], label="R", color="#2ca02c")
+days_plot = sim_data["days"][:len(mean_S)]
+
+# Plot shaded uncertainty bands first
+fill_S = ax_ts.fill_between(days_plot, percentile_S_low, percentile_S_high, color="#1f77b4", alpha=0.15)
+fill_I = ax_ts.fill_between(days_plot, percentile_I_low, percentile_I_high, color="#ff7f0e", alpha=0.15)
+fill_R = ax_ts.fill_between(days_plot, percentile_R_low, percentile_R_high, color="#2ca02c", alpha=0.15)
+
+# Plot Mean lines
+line_S, = ax_ts.plot(days_plot, mean_S, label="Mean S", color="#1f77b4")
+line_I, = ax_ts.plot(days_plot, mean_I, label="Mean I", color="#ff7f0e")
+line_R, = ax_ts.plot(days_plot, mean_R, label="Mean R", color="#2ca02c")
+
+# Plot mean extinction day line
+if mean_extinction_day is not None:
+    ax_ts.axvline(mean_extinction_day, linestyle=":", color="#a02c2c", alpha=0.8, label="Mean Extinction") 
+
+# NEW: Plot mean peak infection day line
+if mean_peak_day is not None:
+    ax_ts.axvline(mean_peak_day, linestyle="-.", color="#ff7f0e", alpha=0.9, label="Mean Peak") 
+
+# Construct the descriptive text
+extinction_label = f"Runs: {NUM_SIMULATIONS}\n"
+if mean_extinction_day is not None:
+    extinction_label += f"Avg Extinction: Day {mean_extinction_day}\n"
+else:
+    extinction_label += "Avg Extinction: N/A\n"
+
+if mean_peak_day is not None:
+    extinction_label += f"Avg Peak: Day {mean_peak_day}"
+else:
+    extinction_label += "Avg Peak: N/A"
+
+
 ax_ts.set_xlabel("Day", color="white")
 ax_ts.set_ylabel("Number of individuals", color="white")
-ax_ts.set_title("Spatial SIR - Dynamic Lockdown", color="white")
+ax_ts.set_title(f"Spatial SIR - Mean of {NUM_SIMULATIONS} Runs", color="white")
 ax_ts.set_ylim(0, N_total)
 ax_ts.tick_params(colors="white")
 for spine in ax_ts.spines.values(): spine.set_color("white")
@@ -296,9 +418,11 @@ legend = ax_ts.legend(facecolor="#333333", edgecolor="none", loc="upper right")
 for text in legend.get_texts(): 
     text.set_color("white")
 
+# UPDATE: Change extinction text to show the mean
 vline = ax_ts.axvline(0, linestyle="--", color="white", alpha=0.7)
-extinction_text = ax_ts.text(0.02, 0.95, "", transform=ax_ts.transAxes, color="white", fontsize=9, va="top")
-# New Lockdown text indicator
+extinction_text = ax_ts.text(0.02, 0.98, extinction_label, transform=ax_ts.transAxes, color="white", fontsize=9, va="top")
+
+# Lockdown text indicator - uses run 1 data
 lockdown_text = ax_ts.text(0.02, 0.88, "", transform=ax_ts.transAxes, color="#ff4444", fontsize=12, fontweight="bold", va="top")
 
 lockdown_spans = []
@@ -309,27 +433,24 @@ def draw_lockdown_spans(intervals):
         span.remove()
     lockdown_spans = []
     
+    # Note: Only using the lockdown history of the first run for plotting.
     for (start, end) in intervals:
         if end > start:
-            # Add a slight visual gap or alpha to make distinct blocks visible
-            span = ax_ts.axvspan(start, end, color="gray", alpha=0.3, label="Lockdown")
+            span = ax_ts.axvspan(start, end, color="gray", alpha=0.3, label="Lockdown (Run 1)")
             lockdown_spans.append(span)
 
-draw_lockdown_spans(sim_data["lockdown_intervals"])
+# Use the lockdown intervals from the first run (all_sim_data[0])
+draw_lockdown_spans(all_sim_data[0]["lockdown_intervals"])
 
-def update_extinction_text():
-    d = sim_data["extinction_day"]
-    txt = "Extinction: > 1247" if d is None else f"Extinction day: {d}"
-    extinction_text.set_text(txt)
+# Update x-axis limit based on max length
+ax_ts.set_xlim(0, max_len - 1)
 
-update_extinction_text()
-ax_ts.set_xlim(0, sim_data["extinction_day"] if sim_data["extinction_day"] else max_days)
 
 # -------------------------------------------------------------------
 # 9. Day slider
 # -------------------------------------------------------------------
 ax_slider = fig.add_axes([0.10, 0.16, 0.45, 0.03])
-day_slider = Slider(ax=ax_slider, label="Day", valmin=0, valmax=max_days, valinit=0, valstep=1, color="#444444")
+day_slider = Slider(ax=ax_slider, label="Day", valmin=0, valmax=max_len - 1, valinit=0, valstep=1, color="#444444")
 day_slider.label.set_color("white")
 day_slider.valtext.set_color("white")
 
@@ -337,33 +458,39 @@ def update_slider(day_value):
     global sim_data
     day_idx = int(day_value)
     day_idx = max(0, min(sim_data["num_days"] - 1, day_idx))
-    current_I = sim_data["I_hist"][day_idx].astype(float)
-    gdf["infected"] = current_I
-    map_collection.set_array(current_I)
+    
+    # Use the spatial data from the first run (all_sim_data[0]) for the map
+    if day_idx < len(all_sim_data[0]["I_hist"]):
+        current_I = all_sim_data[0]["I_hist"][day_idx].astype(float)
+        gdf["infected"] = current_I
+        map_collection.set_array(current_I)
+    
     vline.set_xdata([day_idx, day_idx])
     day_box.set_val(str(day_idx))
     
-    # Update legend text with current S, I, R values
-    val_S = int(sim_data["total_S"][day_idx])
-    val_I = int(sim_data["total_I"][day_idx])
-    val_R = int(sim_data["total_R"][day_idx])
+    # Update legend text with mean S, I, R values
+    val_S = int(mean_S[day_idx])
+    val_I = int(mean_I[day_idx])
+    val_R = int(mean_R[day_idx])
     
     if legend:
         texts = legend.get_texts()
+        # Find the text objects for the S, I, R lines (index 0, 1, 2)
         if len(texts) >= 3:
-            texts[0].set_text(f"S: {val_S:,}")
-            texts[1].set_text(f"I: {val_I:,}")
-            texts[2].set_text(f"R: {val_R:,}")
+            texts[0].set_text(f"Mean S: {val_S:,}")
+            texts[1].set_text(f"Mean I: {val_I:,}")
+            texts[2].set_text(f"Mean R: {val_R:,}")
 
-    # Check and update lockdown status text
+    # Check and update lockdown status text (using run 1 data)
     is_locked = False
-    for start, end in sim_data["lockdown_intervals"]:
+    lockdown_intervals_run1 = all_sim_data[0]["lockdown_intervals"]
+    for start, end in lockdown_intervals_run1:
         if start <= day_idx < end:
             is_locked = True
             break
     
     if is_locked:
-        lockdown_text.set_text("LOCKDOWN")
+        lockdown_text.set_text("LOCKDOWN (Run 1)")
     else:
         lockdown_text.set_text("")
 
@@ -391,36 +518,46 @@ day_box.on_submit(submit_day)
 # -------------------------------------------------------------------
 # 11. Re-simulation helpers
 # -------------------------------------------------------------------
-def apply_simulation_to_plots():
-    line_S.set_data(sim_data["days"], sim_data["total_S"])
-    line_I.set_data(sim_data["days"], sim_data["total_I"])
-    line_R.set_data(sim_data["days"], sim_data["total_R"])
+# Note: The original 'apply_simulation_to_plots' logic has been removed as the statistics are pre-calculated.
+# A full re-run would require re-running the 20 simulations loop.
+
+def reset_plots_to_initial_state():
+    """ Reset the visual elements to Day 0 using pre-calculated means and Run 1 map data. """
     
-    limit_day = sim_data["extinction_day"] if sim_data["extinction_day"] else max_days
-    ax_ts.set_xlim(0, limit_day)
+    days_plot = sim_data["days"][:len(mean_S)]
+    line_S.set_data(days_plot, mean_S)
+    line_I.set_data(days_plot, mean_I)
+    line_R.set_data(days_plot, mean_R)
+    
+    # The fill areas are complex to manage, so we trust the initial plot setup and only reset data/view.
+    
+    ax_ts.set_xlim(0, max_len - 1)
     ax_ts.set_ylim(0, N_total)
     
-    draw_lockdown_spans(sim_data["lockdown_intervals"])
+    # Update lockdown spans for Run 1
+    draw_lockdown_spans(all_sim_data[0]["lockdown_intervals"])
     
-    day0_I = sim_data["I_hist"][0].astype(float)
+    # Update map data for Day 0 (Run 1)
+    day0_I = all_sim_data[0]["I_hist"][0].astype(float)
     gdf["infected"] = day0_I
     map_collection.set_array(day0_I)
     
-    new_max = sim_data["infected_max"]
+    # Update colorbar max value (using Run 1 max)
+    new_max = all_sim_data[0]["infected_max"]
     if new_max <= 0: new_max = 1
     sm.set_clim(0.0, new_max)
     map_collection.set_clim(0.0, new_max)
     cbar.update_normal(sm)
-    
-    update_extinction_text()
+
     day_slider.set_val(0)
     day_box.set_val("0")
     vline.set_xdata([0, 0])
     
-    # Initialize legend and text for Day 0
+    # Initial legend and text update
     update_slider(0) 
     
     fig.canvas.draw_idle()
+
 
 # -------------------------------------------------------------------
 # 12. Control buttons
@@ -452,12 +589,13 @@ def on_play_pause(event):
     global is_playing
     if is_playing:
         is_playing = False
-        btn_play_pause.label.set_text("Play")
+        btn_play_pause.label.set_text("Pause")
     else:
         is_playing = True
-        btn_play_pause.label.set_text("Pause")
+        btn_play_pause.label.set_text("Play")
     start = int(day_slider.val)
-    for d in range(start, max_days + 1):
+    # The loop limit must be max_len-1 as the day_slider max is max_len-1
+    for d in range(start, max_len): 
         if not is_playing: break
         day_slider.set_val(d)
         day_box.set_val(str(d))
@@ -465,14 +603,13 @@ def on_play_pause(event):
 
 btn_play_pause.on_clicked(on_play_pause)
 
-ax_rand = fig.add_axes([0.58, 0.08, 0.20, 0.045])
-btn_rand = Button(ax_rand, "Randomize", color=button_color, hovercolor=hover_color)
-btn_rand.label.set_color(text_color)
-btn_rand.on_clicked(lambda e: (globals().update(is_playing=False), globals().update(sim_data=simulate()), apply_simulation_to_plots()))
+# Removed the 'Randomize' button as recalculating 20 means is slow for an interactive button
+# You would need to re-run the 20 simulation loop and stat calcs.
 
 ax_reset = fig.add_axes([0.80, 0.08, 0.08, 0.045])
 btn_reset = Button(ax_reset, "Reset", color=button_color, hovercolor=hover_color)
 btn_reset.label.set_color(text_color)
+# Reset button just goes back to day 0
 btn_reset.on_clicked(lambda e: (globals().update(is_playing=False), day_slider.set_val(0), day_box.set_val("0")))
 
 # Initial call to set legend and text values correctly on startup
