@@ -62,7 +62,7 @@ seed_indices = sorted_nonzero_indices[:num_seed_cells]
 # 3. Epidemiological parameters
 # -------------------------------------------------------------------
 infection_fatality_ratio = 0.0068
-infectious_period = 7.0  
+infectious_period = 10.0  
 exit_rate = 1.0 / infectious_period
 mu = infection_fatality_ratio * exit_rate
 gamma = exit_rate - mu
@@ -78,14 +78,14 @@ alpha = 1.0 / waning_immunity_days
 use_lockdown = True
 
 # 1. Infection Thresholds (% of total population)
-lockdown_trigger_start = 5.0  # Start if > % infected
-lockdown_trigger_end = 2.0    # End if < % infected
+lockdown_trigger_start = 4  # Start if > % infected
+lockdown_trigger_end = 1    # End if < % infected
 
 # 2. Stability Constraints (prevent rapid switching)
-min_lockdown_duration = 21    # Once started, must last at least 3 weeks
-min_cooldown_duration = 14    # Once ended, cannot restart for 2 weeks
+min_lockdown_duration = 42    # Once started, must last at least 3 weeks (~5–7 days infectious period + lags in the model, anything shorter than 2 weeks tends to barely dent the curve. 3 weeks is a common policy length in many real-world waves.)
+min_cooldown_duration = 21    # Once ended, cannot restart for 2 weeks (roughly matches one generation of infection + detection + policy reaction. It avoids immediate re-locking on noisy fluctuations)
 
-lockdown_contact_factor = 0.2  # % reduction
+lockdown_contact_factor = 0.25 # % reduction
 
 # --- Global mixing weights ------------------------------------------
 if N.max() > 0:
@@ -285,7 +285,7 @@ line_I, = ax_ts.plot(sim_data["days"], sim_data["total_I"], label="I", color="#f
 line_R, = ax_ts.plot(sim_data["days"], sim_data["total_R"], label="R", color="#2ca02c")
 ax_ts.set_xlabel("Day", color="white")
 ax_ts.set_ylabel("Number of individuals", color="white")
-ax_ts.set_title("Spatial SIR - Dynamic Lockdown (Min duration 21d)", color="white")
+ax_ts.set_title("Spatial SIR - Dynamic Lockdown", color="white")
 ax_ts.set_ylim(0, N_total)
 ax_ts.tick_params(colors="white")
 for spine in ax_ts.spines.values(): spine.set_color("white")
