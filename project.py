@@ -10,7 +10,7 @@
 
 gpkg_path = "population_1km_2024.gpkg"  # Path to GeoPackage
 population_col = "beftotalt"  # Population column in the GPKG
-NUM_SIMULATIONS = 20 # <<<--- MODIFIED: Number of runs
+NUM_SIMULATIONS = 1 # <<<--- MODIFIED: Number of runs
 # -------------------------------------------------------------------
 # 0. Imports
 # -------------------------------------------------------------------
@@ -388,10 +388,6 @@ line_R, = ax_ts.plot(days_plot, mean_R, label="Mean R", color="#2ca02c")
 if mean_extinction_day is not None:
     ax_ts.axvline(mean_extinction_day, linestyle=":", color="#a02c2c", alpha=0.8, label="Mean Extinction") 
 
-# NEW: Plot mean peak infection day line
-if mean_peak_day is not None:
-    ax_ts.axvline(mean_peak_day, linestyle="-.", color="#ff7f0e", alpha=0.9, label="Mean Peak") 
-
 # Construct the descriptive text
 extinction_label = f"Runs: {NUM_SIMULATIONS}\n"
 if mean_extinction_day is not None:
@@ -449,7 +445,7 @@ ax_ts.set_xlim(0, max_len - 1)
 # -------------------------------------------------------------------
 # 9. Day slider
 # -------------------------------------------------------------------
-ax_slider = fig.add_axes([0.10, 0.16, 0.45, 0.03])
+ax_slider = fig.add_axes([0.10, 0.12, 0.45, 0.03])
 day_slider = Slider(ax=ax_slider, label="Day", valmin=0, valmax=max_len - 1, valinit=0, valstep=1, color="#444444")
 day_slider.label.set_color("white")
 day_slider.valtext.set_color("white")
@@ -501,7 +497,7 @@ day_slider.on_changed(update_slider)
 # -------------------------------------------------------------------
 # 10. TextBox
 # -------------------------------------------------------------------
-ax_daybox = fig.add_axes([0.10, 0.08, 0.16, 0.045])
+ax_daybox = fig.add_axes([0.10, 0.04, 0.16, 0.045])
 ax_daybox.set_facecolor("white")
 day_box = TextBox(ax_daybox, "Select day", initial="0")
 day_box.label.set_color("white")
@@ -571,17 +567,17 @@ def step_day(delta):
     day_slider.set_val(new)
     day_box.set_val(str(int(new)))
 
-ax_prev = fig.add_axes([0.58, 0.16, 0.05, 0.04])
+ax_prev = fig.add_axes([0.58, 0.12, 0.05, 0.04])
 btn_prev = Button(ax_prev, "<", color=button_color, hovercolor=hover_color)
 btn_prev.label.set_color(text_color)
 btn_prev.on_clicked(lambda e: step_day(-1))
 
-ax_next = fig.add_axes([0.64, 0.16, 0.05, 0.04])
+ax_next = fig.add_axes([0.64, 0.12, 0.05, 0.04])
 btn_next = Button(ax_next, ">", color=button_color, hovercolor=hover_color)
 btn_next.label.set_color(text_color)
 btn_next.on_clicked(lambda e: step_day(1))
 
-ax_play_pause = fig.add_axes([0.70, 0.16, 0.08, 0.04])
+ax_play_pause = fig.add_axes([0.70, 0.12, 0.08, 0.04])
 btn_play_pause = Button(ax_play_pause, "Play", color=button_color, hovercolor=hover_color)
 btn_play_pause.label.set_color(text_color)
 
@@ -606,7 +602,7 @@ btn_play_pause.on_clicked(on_play_pause)
 # Removed the 'Randomize' button as recalculating 20 means is slow for an interactive button
 # You would need to re-run the 20 simulation loop and stat calcs.
 
-ax_reset = fig.add_axes([0.80, 0.08, 0.08, 0.045])
+ax_reset = fig.add_axes([0.80, 0.04, 0.08, 0.045])
 btn_reset = Button(ax_reset, "Reset", color=button_color, hovercolor=hover_color)
 btn_reset.label.set_color(text_color)
 # Reset button just goes back to day 0
