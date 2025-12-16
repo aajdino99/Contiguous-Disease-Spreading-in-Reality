@@ -97,7 +97,7 @@ lockdown_trigger_end = 1 # End if < % infected
 min_lockdown_duration = 42
 min_cooldown_duration = 21
 
-lockdown_contact_factor = 0.25 # % reduction
+lockdown_contact_factor = 0.75 # % reduction
 
 # --- Global mixing weights ------------------------------------------
 if N.max() > 0:
@@ -349,18 +349,24 @@ gs = GridSpec(1, 2, width_ratios=[1.1, 1.4], wspace=0.3, figure=fig)
 ax_map = fig.add_subplot(gs[0, 0])
 ax_ts = fig.add_subplot(gs[0, 1])
 plt.subplots_adjust(bottom=0.26)
-dark_gray = "#222222"
+dark_gray = "#ff914d"
+# PLOT INTERIOR COLOR (lighter_gray)
 lighter_gray = "#333333"
 fig.patch.set_facecolor(dark_gray)
 ax_map.set_facecolor(dark_gray)
+# REVERTED: Keep ax_ts background back to light gray
 ax_ts.set_facecolor(lighter_gray)
+
+# Define the new dark color (requested for axes numbers and titles)
+custom_color = "#0b1f3a"
 
 # -------------------------------------------------------------------
 # 7. Map
 # -------------------------------------------------------------------
 cmap = LinearSegmentedColormap.from_list("black_yellow_red", ["#000000", "#ffff00", "#ff0000"])
 gdf.plot(column="infected", ax=ax_map, cmap=cmap, vmin=0.0, vmax=infected_max_single_run, linewidth=0, edgecolor="none")
-ax_map.set_title(f"Infected map (Run 1)", color="white")
+# MODIFICATION: Set map title color to the dark custom color
+ax_map.set_title(f"Infected map (Run 1)", color=custom_color, fontweight="bold")
 ax_map.set_axis_off()
 map_collection = ax_map.collections[0]
 sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=0.0, vmax=infected_max_single_run))
@@ -376,14 +382,10 @@ plt.setp(cbar.ax.get_yticklabels(), color="white")
 # -------------------------------------------------------------------
 
 # --- MODIFICATION START: Calculate the data cut-off index ---
-# The cut-off is the mean extinction day + 1 to include the day of extinction.
-# If mean_extinction_day is None, use max_len (the full length).
 cut_off_idx = max_len
 if mean_extinction_day is not None:
-    # Ensure the index does not exceed the array bounds
     cut_off_idx = min(mean_extinction_day + 1, max_len)
 
-# Slice the data arrays up to the cut-off index
 days_plot = sim_data["days"][:cut_off_idx]
 plot_mean_S = mean_S[:cut_off_idx]
 plot_mean_I = mean_I[:cut_off_idx]
@@ -419,13 +421,20 @@ if mean_peak_day is not None:
 else:
     extinction_label += "Avg Peak: N/A"
 
-
-ax_ts.set_xlabel("Day", color="white")
-ax_ts.set_ylabel("Number of individuals", color="white")
-ax_ts.set_title(f"Spatial SIR - Mean of {NUM_SIMULATIONS} Runs", color="white")
+# MODIFIED: Set labels and title color to the dark custom color
+ax_ts.set_xlabel("Day", color=custom_color, fontweight="bold")
+ax_ts.set_ylabel("Number of individuals", color=custom_color, fontweight="bold")
+ax_ts.set_title(f"Spatial SIR - Mean of {NUM_SIMULATIONS} Runs", color=custom_color, fontweight="bold")
 ax_ts.set_ylim(0, N_total)
-ax_ts.tick_params(colors="white")
+
+# *** CRITICAL MODIFICATION for Axis Numbers/Ticks ***
+# 1. Ticks point out (numbers outside plot area)
+# 2. Set tick line color to white (to blend with the spine/frame color)
+# 3. Set tick label color (the numbers) to custom_color (dark blue)
+ax_ts.tick_params(axis='both', direction='out', color="white", labelcolor=custom_color)
+# REVERTED: Set spines to white (for contrast on dark gray background)
 for spine in ax_ts.spines.values(): spine.set_color("white")
+
 ax_ts.grid(color="gray", alpha=0.3)
 
 # Legend setup with initial values
@@ -434,7 +443,8 @@ for text in legend.get_texts():
     text.set_color("white")
 
 # UPDATE: Change extinction text to show the mean
-vline = ax_ts.axvline(0, linestyle="--", color="white", alpha=0.7)
+# REVERTED: Set vline and extinction_text color back to white (interior text)
+vline = ax_ts.axvline(0, linestyle="--", color="yellow", alpha=0.7)
 extinction_text = ax_ts.text(0.02, 0.98, extinction_label, transform=ax_ts.transAxes, color="white", fontsize=9, va="top")
 
 # Lockdown text indicator - uses run 1 data
@@ -452,14 +462,6 @@ def draw_lockdown_spans(intervals):
     # ** THE CODE TO DRAW NEW SPANS IS REMOVED HERE **
     # The remaining line is needed to refresh the plot correctly after clearing.
     fig.canvas.draw_idle()
-
-    # Note: Only using the lockdown history of the first run for plotting.
-    # The block below is commented out/removed to prevent drawing new spans
-    # for (start, end) in intervals:
-    #     span_end = min(end, cut_off_idx)
-    #     if span_end > start:
-    #         span = ax_ts.axvspan(start, span_end, color="gray", alpha=0.3, label="Lockdown (Run 1)")
-    #         lockdown_spans.append(span)
 
 # Use the lockdown intervals from the first run (all_sim_data[0])
 draw_lockdown_spans(all_sim_data[0]["lockdown_intervals"])
@@ -521,7 +523,7 @@ def update_slider(day_value):
             break
 
     if is_locked:
-        lockdown_text.set_text("LOCKDOWN (Run 1)")
+        lockdown_text.set_text("")
     else:
         lockdown_text.set_text("")
 
